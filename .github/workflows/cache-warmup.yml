@@ -1,0 +1,34 @@
+name: Cache Warmup
+
+# Runs every 4 hours to pre-populate the Supabase query cache for all
+# sidebar categories, the Latest feed, the Popular feed, and Trending papers.
+# This means the very first visitor after an arXiv update gets cached data
+# instead of waiting for a live API call.
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'   # 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC
+  workflow_dispatch:          # allow manual trigger from GitHub Actions tab
+
+jobs:
+  warmup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: scripts
+
+      - name: Run cache warmup
+        run: node cache-warmup.js
+        working-directory: scripts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}

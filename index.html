@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ForgeXiv — Research Paper Discussion</title>
+  <meta name="description" content="Browse and discuss arXiv preprints in a forum-style interface." />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css" crossorigin="anonymous" />
+  <script>
+    // Set theme before paint to avoid flash
+    (function(){
+      var t = localStorage.getItem('arxiv-forum-theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='28'>📄</text></svg>" />
+</head>
+<body>
+
+<!-- ══ Header ═══════════════════════════════════════════════ -->
+<header class="site-header">
+  <div class="header-inner">
+    <a class="logo" href="index.html">ForgeXiv</a>
+
+    <form class="search-form" id="searchForm">
+      <input
+        type="text"
+        id="searchInput"
+        placeholder="Search, or paste an arXiv link / ID (e.g. 2301.00001)"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button type="submit">Search</button>
+    </form>
+
+    <nav class="header-nav">
+      <a href="index.html" id="navLatest" class="active">Latest</a>
+      <a href="index.html?sort=relevance" id="navTop">Popular</a>
+      <a href="?view=trending" id="navTrending">Trending</a>
+      <a href="forum.html" id="navForum">Forum</a>
+    </nav>
+    <button id="themeToggle" class="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode"></button>
+  </div>
+</header>
+
+<!-- ══ Body ═════════════════════════════════════════════════ -->
+<div class="page-layout">
+
+  <!-- ── Sidebar ────────────────────────────────────────── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-title">Browse by Category</div>
+
+      <div class="cat-group open" id="grp-cs">
+        <div class="cat-group-label" onclick="toggleGroup('grp-cs')">Computer Science</div>
+        <div class="cat-links">
+          <button class="cat-link" data-cat="cs.AI">cs.AI</button>
+          <button class="cat-link" data-cat="cs.LG">cs.LG</button>
+          <button class="cat-link" data-cat="cs.CV">cs.CV</button>
+          <button class="cat-link" data-cat="cs.CL">cs.CL</button>
+          <button class="cat-link" data-cat="cs.RO">cs.RO</button>
+          <button class="cat-link" data-cat="cs.NE">cs.NE</button>
+          <button class="cat-link" data-cat="cs.DS">cs.DS</button>
+          <button class="cat-link" data-cat="cs.PL">cs.PL</button>
+          <button class="cat-link" data-cat="cs.SE">cs.SE</button>
+          <button class="cat-link" data-cat="cs.CR">cs.CR</button>
+        </div>
+      </div>
+
+      <div class="cat-group" id="grp-math">
+        <div class="cat-group-label" onclick="toggleGroup('grp-math')">Mathematics</div>
+        <div class="cat-links">
+          <button class="cat-link" data-cat="math.AG">math.AG</button>
+          <button class="cat-link" data-cat="math.AP">math.AP</button>
+          <button class="cat-link" data-cat="math.NT">math.NT</button>
+          <button class="cat-link" data-cat="math.PR">math.PR</button>
+          <button class="cat-link" data-cat="math.ST">math.ST</button>
+          <button class="cat-link" data-cat="math.CO">math.CO</button>
+          <button class="cat-link" data-cat="math.OC">math.OC</button>
+        </div>
+      </div>
+
+      <div class="cat-group" id="grp-physics">
+        <div class="cat-group-label" onclick="toggleGroup('grp-physics')">Physics</div>
+        <div class="cat-links">
+          <button class="cat-link" data-cat="quant-ph">quant-ph</button>
+          <button class="cat-link" data-cat="cond-mat">cond-mat</button>
+          <button class="cat-link" data-cat="hep-th">hep-th</button>
+          <button class="cat-link" data-cat="hep-ph">hep-ph</button>
+          <button class="cat-link" data-cat="astro-ph">astro-ph</button>
+          <button class="cat-link" data-cat="gr-qc">gr-qc</button>
+          <button class="cat-link" data-cat="physics.bio-ph">bio-ph</button>
+        </div>
+      </div>
+
+      <div class="cat-group" id="grp-stat">
+        <div class="cat-group-label" onclick="toggleGroup('grp-stat')">Statistics</div>
+        <div class="cat-links">
+          <button class="cat-link" data-cat="stat.ML">stat.ML</button>
+          <button class="cat-link" data-cat="stat.TH">stat.TH</button>
+          <button class="cat-link" data-cat="stat.ME">stat.ME</button>
+          <button class="cat-link" data-cat="stat.AP">stat.AP</button>
+        </div>
+      </div>
+
+      <div class="cat-group" id="grp-bio">
+        <div class="cat-group-label" onclick="toggleGroup('grp-bio')">Biology (q-bio)</div>
+        <div class="cat-links">
+          <button class="cat-link" data-cat="q-bio.NC">q-bio.NC</button>
+          <button class="cat-link" data-cat="q-bio.QM">q-bio.QM</button>
+          <button class="cat-link" data-cat="q-bio.GN">q-bio.GN</button>
+          <button class="cat-link" data-cat="q-bio.BM">q-bio.BM</button>
+        </div>
+      </div>
+
+      <div class="cat-group" id="grp-econ">
+        <div class="cat-group-label" onclick="toggleGroup('grp-econ')">Economics / Finance</div>
+        <div class="cat-links">
+          <button class="cat-link" data-cat="econ.EM">econ.EM</button>
+          <button class="cat-link" data-cat="econ.TH">econ.TH</button>
+          <button class="cat-link" data-cat="q-fin.ST">q-fin.ST</button>
+          <button class="cat-link" data-cat="q-fin.TR">q-fin.TR</button>
+        </div>
+      </div>
+
+      <div class="cat-group" id="grp-eess">
+        <div class="cat-group-label" onclick="toggleGroup('grp-eess')">Eng. &amp; Systems</div>
+        <div class="cat-links">
+          <button class="cat-link" data-cat="eess.SP">eess.SP</button>
+          <button class="cat-link" data-cat="eess.IV">eess.IV</button>
+          <button class="cat-link" data-cat="eess.SY">eess.SY</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── Main content ───────────────────────────────────── -->
+  <main>
+
+    <!-- Active filter row -->
+    <div id="activeFilterRow" style="display:none; margin-bottom:10px;"></div>
+
+    <!-- Feed bar -->
+    <div class="feed-bar">
+      <div class="feed-info" id="feedInfo">Loading…</div>
+    </div>
+
+    <!-- Paper list -->
+    <ul class="thread-list" id="paperList" aria-live="polite"></ul>
+
+    <!-- Infinite scroll trigger point -->
+    <div id="sentinel"></div>
+
+    <!-- Shown while the next batch is being fetched -->
+    <div id="bottomLoader" class="bottom-loader" style="display:none">
+      <span class="pulse"></span>Loading more papers…
+    </div>
+
+    <!-- Shown when all results are exhausted -->
+    <div id="endMessage" style="display:none" class="end-message"></div>
+
+  </main>
+</div>
+
+<!-- Background preload status badge (bottom-right, unobtrusive) -->
+<div id="preloadStatus" class="preload-status"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
+<script src="js/theme.js"></script>
+<script>initTheme();</script>
+<script src="js/config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/arxiv.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/comments.js"></script>
+<script src="js/auth-modal.js"></script>
+<script src="js/collections.js"></script>
+<script src="js/preloader.js"></script>
+<script src="js/index.js"></script>
+<script>
+  // Start background preload 4 s after the page loads
+  // (gives the main fetch time to complete first)
+  window.addEventListener('load', () => startBackgroundPreload(4000));
+</script>
+</body>
+</html>

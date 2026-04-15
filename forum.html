@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Forum — ForgeXiv</title>
+  <meta name="description" content="Discuss research, share ideas, and connect with the community on ForgeXiv." />
+  <link rel="stylesheet" href="style.css" />
+  <script>
+    (function(){
+      var t = localStorage.getItem('arxiv-forum-theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='28'>📄</text></svg>" />
+</head>
+<body>
+
+<!-- ══ Header ═══════════════════════════════════════════════ -->
+<header class="site-header">
+  <div class="header-inner">
+    <a class="logo" href="index.html">ForgeXiv</a>
+
+    <nav class="header-nav">
+      <a href="index.html">Latest</a>
+      <a href="index.html?sort=relevance">Popular</a>
+      <a href="index.html?view=trending">Trending</a>
+      <a href="forum.html" class="active">Forum</a>
+    </nav>
+    <button id="themeToggle" class="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode"></button>
+  </div>
+</header>
+
+<!-- ══ Body ═════════════════════════════════════════════════ -->
+<div class="page-full" id="forumRoot">
+
+  <!-- List view -->
+  <div id="forumListView" style="display:none">
+    <div class="forum-page-header">
+      <div>
+        <h1 class="forum-page-title">Community Forum</h1>
+        <span class="feed-info" id="forumInfo"></span>
+      </div>
+      <button class="btn btn-primary forum-create-btn" id="forumCreateBtn"
+        style="display:none" onclick="openCreatePost()">+ New Post</button>
+    </div>
+
+    <!-- Create post form -->
+    <div id="forumCreateForm" style="display:none" class="comment-form-box">
+      <h3>Create a Post</h3>
+      <form class="comment-form" onsubmit="submitCreatePost(event)">
+        <input type="text" id="fpTitle" placeholder="Title (required)" maxlength="200" required />
+        <textarea id="fpBody" placeholder="What's on your mind?" maxlength="20000" rows="5" required></textarea>
+        <input type="text" id="fpPaperId" placeholder="Link an arXiv paper ID (optional, e.g. 2301.00001)" />
+        <div class="form-row">
+          <button type="submit" class="btn btn-primary" id="fpSubmitBtn">Post</button>
+          <button type="button" class="btn btn-sm" onclick="openCreatePost()">Cancel</button>
+          <span class="form-error" id="fpError"></span>
+        </div>
+      </form>
+    </div>
+
+    <div id="forumPostList"></div>
+
+    <div style="text-align:center;padding:20px 0;display:none" id="forumLoadMoreWrap">
+      <button class="btn" id="forumLoadMore" onclick="loadMoreForumPosts()">Load more</button>
+    </div>
+  </div>
+
+  <!-- Detail view -->
+  <div id="forumDetailView" style="display:none">
+    <div id="forumDetailContent"></div>
+  </div>
+
+</div>
+
+<script src="js/theme.js"></script>
+<script>initTheme();</script>
+<script src="js/config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/arxiv.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/comments.js"></script>
+<script src="js/auth-modal.js"></script>
+<script src="js/collections.js"></script>
+<script src="js/forum.js"></script>
+<script>
+  // Show "Load more" button after initial load
+  window.addEventListener('DOMContentLoaded', () => {
+    const wrap = document.getElementById('forumLoadMoreWrap');
+    const btn  = document.getElementById('forumLoadMore');
+    if (wrap && btn) {
+      // Observer: show wrap when btn has display:block
+      const observer = new MutationObserver(() => {
+        wrap.style.display = btn.style.display === 'block' ? 'block' : 'none';
+      });
+      observer.observe(btn, { attributes: true, attributeFilter: ['style'] });
+    }
+  });
+</script>
+</body>
+</html>

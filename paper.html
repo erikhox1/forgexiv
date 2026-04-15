@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Paper — ForgeXiv</title>
+  <meta name="description" content="Read and discuss arXiv preprints." />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css" crossorigin="anonymous" />
+  <script>
+    (function(){
+      var t = localStorage.getItem('arxiv-forum-theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='28'>📄</text></svg>" />
+</head>
+<body>
+
+<!-- ══ Header ═══════════════════════════════════════════════ -->
+<header class="site-header">
+  <div class="header-inner">
+    <a class="logo" href="index.html">ForgeXiv</a>
+
+    <form class="search-form" id="searchForm" onsubmit="doSearch(event)">
+      <input
+        type="text"
+        id="searchInput"
+        placeholder="Search papers…"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button type="submit">Search</button>
+    </form>
+
+    <nav class="header-nav">
+      <a href="index.html">Latest</a>
+      <a href="forum.html">Forum</a>
+    </nav>
+    <button id="themeToggle" class="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode"></button>
+  </div>
+</header>
+
+<!-- ══ Body ═════════════════════════════════════════════════ -->
+<div class="page-full" id="pageContent">
+  <div class="loading-wrap">
+    <span class="pulse"></span>Fetching paper…
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
+<script src="js/theme.js"></script>
+<script>initTheme();</script>
+<script src="js/config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/arxiv.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/comments.js"></script>
+<script src="js/auth-modal.js"></script>
+<script src="js/collections.js"></script>
+<script src="js/paper.js"></script>
+</body>
+</html>

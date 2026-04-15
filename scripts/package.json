@@ -1,0 +1,10 @@
+{
+  "name": "forgexiv-cache-warmup",
+  "version": "1.0.0",
+  "description": "Background cache warmup for ForgeXiv — populates Supabase with arXiv API results",
+  "main": "cache-warmup.js",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.0.0",
+    "@xmldom/xmldom": "^0.9.0"
+  }
+}

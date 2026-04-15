@@ -1,0 +1,6 @@
+# Local Netlify folder
+.netlify
+
+# Node modules (scripts/ dependencies)
+node_modules/
+scripts/node_modules/

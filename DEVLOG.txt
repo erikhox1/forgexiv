@@ -1,0 +1,514 @@
+================================================================================
+  arXiv·Forum — Development Log, Architecture Reference & Future Work
+  Project root: C:\Users\erikh\Desktop\arxiv_wrapper
+  Last updated:  2026-04-13
+================================================================================
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 1. PROJECT OVERVIEW
+────────────────────────────────────────────────────────────────────────────────
+
+arXiv·Forum is a forum-style web interface for browsing and discussing arXiv
+preprints. It wraps the public arXiv Atom API and adds a community comment layer
+on top, using Supabase (free tier) for storage and Netlify (free tier) for
+hosting and serverless functions.
+
+Key goals:
+  - Give arXiv papers a Reddit/HN-style forum feel with comment threads
+  - Keep infrastructure cost at $0 (Netlify free + Supabase free)
+  - Respect arXiv's rate limits and minimise API calls through aggressive caching
+  - Work offline-ish via localStorage — the app never feels slow on repeat visits
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 2. TECHNOLOGY STACK
+────────────────────────────────────────────────────────────────────────────────
+
+  Layer              Technology          Why
+  ─────────────────  ──────────────────  ──────────────────────────────────────
+  Hosting            Netlify (free)      Continuous deploy from git, no servers
+  API proxy          Netlify Functions   arXiv has no CORS headers; we proxy it
+  Paper data         arXiv Atom API      Free, no auth, returns XML feeds
+  Comment storage    Supabase (free)     Postgres + Realtime + Row-Level Security
+  Cache (shared)     Supabase table      query_cache: shared across all users
+  Cache (local)      localStorage        L1: instant, browser-local, ~4h TTL
+  Math rendering     KaTeX (CDN)         Fast LaTeX rendering, MIT licence
+  Build system       None                Vanilla HTML/CSS/JS, no bundler needed
+
+arXiv API docs:
+  https://info.arxiv.org/help/api/user-manual.html
+  https://info.arxiv.org/help/api/basics.html
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 3. FILE STRUCTURE
+────────────────────────────────────────────────────────────────────────────────
+
+  arxiv_wrapper/
+  ├── index.html              Main feed page (latest / search / trending)
+  ├── paper.html              Single paper detail + comments
+  ├── style.css               All styles; CSS custom properties for theming
+  ├── netlify.toml            Netlify build config + security headers
+  ├── supabase-schema.sql     SQL to run once in Supabase Dashboard > SQL Editor
+  ├── DEVLOG.txt              This file
+  │
+  ├── js/
+  │   ├── config.js           ARXIV_FORUM_CONFIG (Supabase URL + anon key)
+  │   ├── theme.js            Light/dark toggle; persists to localStorage
+  │   ├── arxiv.js            arXiv API client + two-level cache + XML parser
+  │   ├── comments.js         Supabase comment CRUD + trending query
+  │   ├── preloader.js        Background cache warmer + 4-hour auto-refresh
+  │   └── index.js            Feed page logic: infinite scroll, prefetch, nav
+  │
+  └── netlify/
+      └── functions/
+          └── arxiv.js        Serverless HTTPS proxy for arXiv API
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 4. SETUP INSTRUCTIONS (first-time)
+────────────────────────────────────────────────────────────────────────────────
+
+ 4a. Supabase
+ ─────────────
+  1. Create a free project at https://supabase.com
+  2. Go to Dashboard > SQL Editor > New query
+  3. Paste the contents of supabase-schema.sql and click Run
+     (Creates tables: comments, query_cache — both with RLS enabled)
+  4. Go to Project Settings > API
+  5. Copy "Project URL" and "anon / public" key
+  6. Paste into js/config.js:
+
+       window.ARXIV_FORUM_CONFIG = {
+         SUPABASE_URL:      'https://YOUR_PROJECT_ID.supabase.co',
+         SUPABASE_ANON_KEY: 'YOUR_ANON_KEY',
+       };
+
+     NOTE: the anon key is safe to commit — it is a publishable key and
+     Supabase Row-Level Security policies enforce read/write rules server-side.
+     Never commit the service_role / secret key.
+
+ 4b. Netlify
+ ────────────
+  1. Push the project to a GitHub repo
+  2. Go to https://app.netlify.com > Add new site > Import from Git
+  3. Select the repo; build settings are auto-detected from netlify.toml
+     (no build command needed; publish directory is ".")
+  4. Deploy — the serverless function is live at /.netlify/functions/arxiv
+
+ 4c. Local development
+ ──────────────────────
+  1. Install Netlify CLI:  npm install -g netlify-cli
+  2. Run:  netlify dev
+  3. Open:  http://localhost:8888
+  The function at netlify/functions/arxiv.js is served at
+  /.netlify/functions/arxiv exactly as it would be in production.
+
+  IMPORTANT: Do NOT open index.html directly from the filesystem (file://).
+  CORS will be blocked and the proxy function won't be reachable.
+  Always use `netlify dev` or serve via any local HTTP server.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 5. ARCHITECTURE: CACHING SYSTEM (most complex part)
+────────────────────────────────────────────────────────────────────────────────
+
+arXiv's docs say results only change once per day (midnight UTC), and their
+servers enforce a 3-second rate limit between requests. To avoid hammering the
+API and to keep the UI feeling instant, we have a three-level cache.
+
+  L1  localStorage (browser-local, instant read)
+  L2  Supabase query_cache table (shared across all users, ~50–100ms read)
+  L3  arXiv API (only hit when L1+L2 are both cold/expired)
+
+ Cache key
+ ──────────
+ The key is the URL query string of the arXiv request, e.g.:
+   search_query=cat%3Acs.AI&start=0&max_results=100&sortBy=submittedDate&sortOrder=descending
+
+ TTL logic (same thresholds in both L1 and L2)
+ ──────────────────────────────────────────────
+   Age < 4 hours   → "fresh"  — served directly, no background work
+   Age 4–24 hours  → "stale"  — served immediately + background revalidation
+   Age > 24 hours  → "expired" — entry is evicted; must re-fetch from L3
+
+ Lookup chain (ArXiv.search and ArXiv.getById)
+ ──────────────────────────────────────────────
+  1. Check L1 (cacheGet). If fresh → return immediately.
+  2. Check L2 (sbCacheGet). If found → warm L1, if stale schedule BG refresh, return.
+  3. If L1 is stale → serve stale L1 immediately, schedule BG revalidation.
+  4. Hit L3 (fetchArxiv). Write result to L1 (cacheSet) and L2 (sbCacheSet).
+
+ Why this matters for users
+ ───────────────────────────
+  - First user to browse cs.AI warms both L1 and L2.
+  - Every subsequent user — on any device — gets L2 hit (~100ms) or L1 (~0ms).
+  - The site essentially never makes an arXiv API call for popular categories.
+
+ Auto-refresh (preloader.js)
+ ────────────────────────────
+  - After page load (4s delay), the preloader fetches the 12 most popular
+    categories in the background using the shared rate-limit clock.
+  - After the first run completes, a 4-hour setTimeout schedules the next run.
+    Uses chained setTimeout (not setInterval) so slow runs never overlap.
+  - _forceStale() back-dates localStorage timestamps before each scheduled run
+    so all categories are treated as stale and re-fetched.
+  - Also runs cacheEvict (L1) and sbCacheEvictExpired (L2) to clean up old data.
+
+ Rate limiting
+ ──────────────
+  In-memory variable _lastFetchAt enforces a 3.5-second gap between actual
+  arXiv API calls. Cache hits bypass this entirely — it only applies to L3.
+  The variable is in-memory only (resets on page load); it was previously
+  stored in localStorage which caused a 3.5s mandatory delay on every first
+  load (see "Problems Faced" section).
+
+  If arXiv returns a plain-text "Rate exceeded." response, fetchArxiv retries
+  up to 3 times with exponential backoff (5s, 10s, 15s).
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 6. ARCHITECTURE: INFINITE SCROLL & PREFETCH (index.js)
+────────────────────────────────────────────────────────────────────────────────
+
+  SHOW_BATCH       = 25   papers revealed per scroll trigger
+  FETCH_BATCH      = 100  papers fetched per API call
+  PREFETCH_TRIGGER = 50   start next API fetch when buffer < this
+
+ Flow:
+  1. loadFresh() → fetches 100 papers, shows first 25, buffers remaining 75.
+  2. IntersectionObserver fires when #sentinel comes into view (400px margin).
+     → showMore() splices next 25 from buffer into DOM.
+  3. When buffer drops below 50, prefetch() fires the next API call in BG.
+  4. showMore() and prefetch() both check an epoch counter. Any in-flight
+     async op that finds epoch !== myEpoch silently discards its result,
+     preventing stale data from appearing after a new search is started.
+  5. All prefetched pages are automatically written to L1+L2 cache, so
+     browsing past the preloaded 100 papers builds the shared cache for others.
+
+ Views (state.view)
+ ───────────────────
+  'feed'     — normal latest/search/category feed (infinite scroll active)
+  'trending' — fixed list of papers sorted by 7-day comment count (no scroll)
+
+  Switching between views increments epoch, which cancels all in-flight ops
+  from the previous view.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 7. ARCHITECTURE: COMMENTS (comments.js + paper.html)
+────────────────────────────────────────────────────────────────────────────────
+
+ Supabase table: comments
+ ─────────────────────────
+  id          uuid  PK (gen_random_uuid)
+  paper_id    text  arXiv paper ID (e.g. "2301.00001")
+  author_name text  Free-text, max 100 chars (no auth — anonymous-friendly)
+  content     text  Max 5000 chars
+  parent_id   uuid  FK → comments.id (null = top-level, non-null = reply)
+  created_at  timestamptz
+
+ RLS policies
+ ─────────────
+  public read   — anyone can SELECT
+  public insert — anyone can INSERT (length guards in the policy itself)
+  No UPDATE/DELETE — comments are permanent once posted (intentional)
+
+ Realtime
+ ─────────
+  paper.html subscribes to INSERT events on the paper's channel so new
+  comments appear live without a page refresh. The channel is unsubscribed
+  when the user navigates away (page unload).
+
+ Trending
+ ─────────
+  Comments.trending(limit) queries all comments WHERE created_at >= 7 days ago,
+  counts by paper_id client-side, and returns [{paper_id, count}] sorted desc.
+  Papers with 0 comments never appear because they have no rows in the table.
+  The UI also filters post-fetch (after resolving ArXiv paper metadata) in case
+  an arXiv ID mismatch causes the count lookup to return 0 — those are excluded.
+
+ Batch paper fetch for trending
+ ───────────────────────────────
+  ArXiv.getByIds(ids) runs L1 → L2 → single batched id_list API call for any
+  truly uncached IDs. This means up to N papers can be fetched in 1 API call
+  instead of N sequential rate-limited calls.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 8. ARCHITECTURE: NETLIFY FUNCTION (netlify/functions/arxiv.js)
+────────────────────────────────────────────────────────────────────────────────
+
+ arXiv's API endpoint (export.arxiv.org) does not include CORS headers, so
+ browser fetches to it are blocked. The Netlify function acts as a thin proxy:
+  - Accepts GET requests at /.netlify/functions/arxiv?<same query params>
+  - Forwards them via Node.js https.get to https://export.arxiv.org/api/query
+  - Returns the XML body with CORS headers added
+  - Adds Cache-Control: public, max-age=300 so Netlify's CDN also caches it
+
+ The client (js/arxiv.js) tries the Netlify function first, and falls back to
+ corsproxy.io if the function returns an error or is unreachable (e.g. when
+ opening the file directly from disk — not recommended).
+
+ CRITICAL: Must use https (not http). arXiv silently redirects HTTP→HTTPS
+ but Node's http module does not follow redirects, resulting in an empty
+ response body. The function uses require('https') and https:// URL.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 9. PROBLEMS FACED & HOW THEY WERE SOLVED
+────────────────────────────────────────────────────────────────────────────────
+
+ Problem 1: Empty XML body — articles not loading
+ ──────────────────────────────────────────────────
+  Symptom:  Console showed "raw xml length: 0". Server returned 200 but empty.
+  Cause:    The Netlify function used Node's http module with an http:// URL.
+            arXiv redirects HTTP→HTTPS (301), but Node's http.get does not
+            follow redirects — it returns the redirect response with no body.
+  Fix:      Changed `const http = require('http')` to `const https = require('https')`
+            and the URL to `https://export.arxiv.org/api/query?...`.
+
+ Problem 2: Rate limit exceeded on first page load (6-second delay)
+ ───────────────────────────────────────────────────────────────────
+  Symptom:  Nothing loaded; console showed rate limit wait. Users saw blank
+            page for 6+ seconds on every visit.
+  Cause:    _lastFetchAt (the in-memory rate-limit clock) was accidentally
+            being persisted to localStorage. On page load it was restored,
+            making the app think an API call happened 0ms ago and enforcing
+            a full 3.5s wait before any request could fire.
+  Fix:      Made _lastFetchAt a plain let variable (never written to storage).
+            It now resets to 0 on every page load, so the first call is
+            always immediate. The L1/L2 cache means repeat visits are served
+            without any API call anyway.
+
+ Problem 3: querySelectorAll returning empty on arXiv XML
+ ──────────────────────────────────────────────────────────
+  Symptom:  parseFeed returned 0 papers despite valid XML in the response.
+  Cause:    arXiv returns Atom XML with namespace prefixes (e.g. opensearch:).
+            DOMParser parses it in "application/xml" mode where CSS selectors
+            like querySelectorAll('feed > entry') fail on namespaced elements.
+  Fix:      Replaced all querySelectorAll/querySelector calls with
+            getElementsByTagName() and localName comparisons, which correctly
+            ignore namespace prefixes.
+
+ Problem 4: SyntaxError crashing arxiv.js — window._arxivCache undefined
+ ─────────────────────────────────────────────────────────────────────────
+  Symptom:  Preloader failed with "window._arxivCache is undefined". Nothing
+            loaded on the page.
+  Cause:    There was a duplicate `const qs` declaration inside fetchArxiv()
+            (declared at line 69 and again at line 78). JS strict mode /
+            browsers throw a SyntaxError on duplicate const, which prevented
+            the entire arxiv.js file from executing, so window._arxivCache
+            was never assigned.
+  Fix:      Removed the first (redundant) `const qs` declaration.
+
+ Problem 5: arXiv "Rate exceeded." plain-text response
+ ───────────────────────────────────────────────────────
+  Symptom:  Occasional empty-looking feed; console showed "Rate exceeded."
+  Cause:    arXiv returns a plain-text "Rate exceeded." string (not XML, not
+            an HTTP error code) when the 3-second rule is violated.
+  Fix:      fetchArxiv checks if the response starts with "rate exceeded"
+            (case-insensitive) and retries up to 3 times with exponential
+            backoff (5s, 10s, 15s). If all retries fail, throws a user-
+            friendly error message.
+
+ Problem 6: Trending showed papers with 0 comments after ID mismatch
+ ─────────────────────────────────────────────────────────────────────
+  Symptom:  A paper could appear in the trending list showing "0 comments".
+  Cause:    The paper_id stored in Supabase comments might have a version
+            suffix (e.g. "2301.00001v2") while ArXiv.getByIds strips versions
+            (returning "2301.00001"), causing countMap[p.id] to return 0.
+  Fix:      Added .filter(p => (countMap[p.id] ?? 0) > 0) after fetching
+            paper metadata, so any paper that doesn't map to a positive count
+            is silently excluded from the rendered list.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 10. FEATURE HISTORY (chronological)
+────────────────────────────────────────────────────────────────────────────────
+
+  v1   Initial build: forum-style paper list, comment section per paper,
+       Supabase comments, Netlify proxy, arXiv Atom API integration.
+
+  v2   Wider layout (full-screen), removed sort dropdown, larger sidebar,
+       smooth sidebar category dropdown animations (CSS max-height transition).
+
+  v3   Light/dark mode toggle with localStorage persistence and no-FOUC
+       inline script (theme set before first paint).
+
+  v4   LaTeX rendering via KaTeX auto-render on titles and abstracts.
+
+  v5   Paste-an-arXiv-link feature: search box parses arxiv.org URLs,
+       ar5iv.org URLs, bare IDs (NNNN.NNNNN), and old-style IDs,
+       redirecting directly to paper.html.
+
+  v6   Infinite scroll with background prefetch (IntersectionObserver).
+       Epoch-based cancellation prevents stale results from appearing.
+       SHOW_BATCH=25, FETCH_BATCH=100, PREFETCH_TRIGGER=50.
+
+  v7   Two-level cache: L1 localStorage + L2 Supabase query_cache.
+       All users share the L2 cache — first browser warms it for everyone.
+       Stale-while-revalidate: serve stale data instantly, refresh in BG.
+
+  v8   Background preloader: warms 12 popular categories after page load.
+       4-hour auto-refresh cycle via chained setTimeout.
+       User pages beyond the preloaded buffer are also auto-cached in L2.
+
+  v9   Trending view: papers sorted by most comments in the last 7 days.
+       Papers with 0 comments are excluded. Nav link + bookmarkable URL
+       (?view=trending). Batch ID fetch (ArXiv.getByIds) for efficiency.
+       Hot-count badge (🔥) on trending paper cards.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 11. SUPABASE FREE TIER LIMITS (as of 2026)
+────────────────────────────────────────────────────────────────────────────────
+
+  Database storage    500 MB
+  API requests        Unlimited (no hard cap, subject to fair use)
+  Realtime messages   2 million per month
+  Bandwidth           5 GB per month
+  Max DB connections  60
+
+ What this means for this project:
+  - The query_cache table stores arXiv XML as JSONB. Each row is roughly
+    100–400 KB (100 papers × ~2–4 KB per paper). 200 cached queries ≈ 40 MB.
+    We will not hit the 500 MB limit in practice.
+  - The 24-hour TTL on cache rows (enforced by expires_at + periodic eviction)
+    prevents unbounded growth.
+  - Comments are tiny (~1 KB each). 500 MB / 1 KB ≈ 500,000 comments before
+    hitting the storage limit — effectively unlimited for a niche forum.
+  - Realtime subscriptions (comment live-updates) are only open while a user
+    is on a paper page; 2M messages/month is easily sufficient.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 12. FUTURE WORK / IDEAS
+────────────────────────────────────────────────────────────────────────────────
+
+ Authentication
+ ──────────────
+  Currently comments are fully anonymous (name is a free-text field).
+  Options to add identity:
+  - Supabase Auth (email/magic link, Google OAuth, GitHub OAuth) — free tier
+    includes 50,000 MAU. Add auth.uid() to the comments table and RLS policies
+    to let users edit/delete their own comments.
+  - Keep anonymous but add a simple name + optional email field so regulars
+    can have a consistent identity without mandatory sign-up.
+
+ Upvotes / reactions on comments
+ ─────────────────────────────────
+  Add a comment_votes table:
+    id uuid PK, comment_id uuid FK → comments, user_fingerprint text, created_at
+  Use a browser fingerprint (or Supabase auth uid) as the voter identifier.
+  RLS: one row per (comment_id, fingerprint). Show net vote count on each comment.
+
+ Paper upvotes / "saves"
+ ────────────────────────
+  A separate paper_votes or saved_papers table lets users bookmark papers.
+  Could power a "Most Upvoted This Week" sort option on the feed.
+
+ Full-text search within comments
+ ──────────────────────────────────
+  Supabase supports pg_trgm and full-text search on text columns. Add a
+  GIN index on comments.content and expose a search endpoint.
+
+ Notifications
+ ─────────────
+  When someone replies to your comment, notify you. Options:
+  - Email via Supabase Edge Functions + Resend (free tier: 100 emails/day)
+  - Browser push notifications (Web Push API, no server required)
+
+ Trending: server-side aggregation
+ ──────────────────────────────────
+  Currently Comments.trending() fetches all comment rows from the last 7 days
+  and counts client-side. This is fine for low comment volumes but will get
+  slow once there are thousands of comments.
+  Fix: add a Supabase database function (plpgsql) or a scheduled Edge Function
+  that pre-computes trending counts into a trending_cache table every hour.
+  The JS client then just reads from that table.
+
+  Example SQL function:
+    CREATE OR REPLACE FUNCTION get_trending(lim int DEFAULT 50)
+    RETURNS TABLE(paper_id text, cnt bigint) LANGUAGE sql AS $$
+      SELECT paper_id, count(*) AS cnt
+      FROM comments
+      WHERE created_at >= now() - interval '7 days'
+      GROUP BY paper_id
+      ORDER BY cnt DESC
+      LIMIT lim;
+    $$;
+  Then call: await db.rpc('get_trending', { lim: 50 })
+
+ Supabase delete policy for old cache rows
+ ───────────────────────────────────────────
+  Currently only the "public update" and "public insert" RLS policies exist
+  on query_cache. The periodic eviction (sbCacheEvictExpired) uses a DELETE
+  which requires a "public delete" policy. Add to supabase-schema.sql:
+
+    CREATE POLICY "public delete" ON query_cache FOR DELETE USING (true);
+
+  (The current schema is missing this — eviction silently fails without it.
+  Test by checking whether Supabase returns an error on the delete call.)
+
+ Category page with paper count badges
+ ───────────────────────────────────────
+  Show the number of cached papers per category in the sidebar so users know
+  which categories have fresh data.
+
+ Paper detail: related papers
+ ─────────────────────────────
+  After showing a paper, fetch "see also" recommendations by querying arXiv
+  for the primary category with the same sort, then filtering to exclude the
+  current paper. Display in a sidebar widget on paper.html.
+
+ Dark/light auto-detect
+ ───────────────────────
+  Currently defaults to dark mode. Could instead default to the OS preference:
+    localStorage.getItem('arxiv-forum-theme')
+      ?? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+
+ Offline support / PWA
+ ──────────────────────
+  Add a Service Worker that caches the app shell (HTML, CSS, JS) and intercepts
+  ArXiv API calls to serve from cache when offline. The existing L1 cache
+  already stores papers in localStorage — the SW would just need to handle
+  the network layer.
+
+ Admin moderation
+ ─────────────────
+  Add a soft-delete column (deleted_at timestamptz) to comments and a
+  Supabase RLS policy that hides deleted comments from public reads:
+    USING (deleted_at IS NULL)
+  An admin service_role client can set deleted_at without needing a UI.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 13. KEY CODE LOCATIONS (quick reference)
+────────────────────────────────────────────────────────────────────────────────
+
+  Task                                File                    Approx. line
+  ─────────────────────────────────── ──────────────────────  ─────────────
+  arXiv search / cache logic          js/arxiv.js             158–250
+  Rate limiter + retry                js/arxiv.js             115–155
+  XML parser                          js/arxiv.js             252–347
+  L1 cache get/set/evict              js/arxiv.js             24–59
+  L2 Supabase cache get/set/evict     js/arxiv.js             69–111
+  Batch paper fetch (getByIds)        js/arxiv.js             226–275
+  Supabase client init                js/comments.js          8–14
+  Comment CRUD                        js/comments.js          16–90
+  Trending query                      js/comments.js          96–116
+  Background preloader                js/preloader.js         34–73
+  4-hour auto-refresh schedule        js/preloader.js         80–118
+  Infinite scroll + epoch cancel      js/index.js             55–250
+  Trending view renderer              js/index.js             135–214
+  Nav active state                    js/index.js             setNavActive()
+  Thread card HTML                    js/index.js             threadHTML()
+  Netlify proxy function              netlify/functions/      arxiv.js
+  Supabase table schemas + RLS        supabase-schema.sql     entire file
+  CSS custom properties (theme)       style.css               top of file
+  Hot-count (trending) badge style    style.css               ~line 455
+
+
+================================================================================

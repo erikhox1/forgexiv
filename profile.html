@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Profile — ForgeXiv</title>
+  <meta name="description" content="User profile on ForgeXiv." />
+  <link rel="stylesheet" href="style.css" />
+  <script>
+    (function(){
+      var t = localStorage.getItem('arxiv-forum-theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='28'>📄</text></svg>" />
+</head>
+<body>
+
+<!-- ══ Header ═══════════════════════════════════════════════ -->
+<header class="site-header">
+  <div class="header-inner">
+    <a class="logo" href="index.html">ForgeXiv</a>
+
+    <nav class="header-nav">
+      <a href="index.html">Latest</a>
+      <a href="index.html?sort=relevance">Popular</a>
+      <a href="index.html?view=trending">Trending</a>
+      <a href="forum.html">Forum</a>
+    </nav>
+    <button id="themeToggle" class="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode"></button>
+  </div>
+</header>
+
+<!-- ══ Body ═════════════════════════════════════════════════ -->
+<div class="page-full">
+  <div id="profileRoot">
+    <div class="loading-wrap"><span class="pulse"></span>Loading profile…</div>
+  </div>
+</div>
+
+<script src="js/theme.js"></script>
+<script>initTheme();</script>
+<script src="js/config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/arxiv.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/comments.js"></script>
+<script src="js/auth-modal.js"></script>
+<script src="js/collections.js"></script>
+<script src="js/forum.js"></script>
+<script src="js/profile.js"></script>
+</body>
+</html>
