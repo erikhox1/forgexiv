@@ -114,7 +114,7 @@ async function warmFeed(sortBy) {
   const cacheKey = params.toString();
   const xml  = await fetchArxiv(cacheKey);
   const feed = parseFeed(xml);
-  if (!feed.papers.length) throw new Error('No papers returned');
+  if (!feed.papers.length) return 0; // arXiv returned nothing — skip, don't error
   await sbWrite(cacheKey, feed);
   return feed.papers.length;
 }
@@ -133,7 +133,7 @@ async function warmCategory(category) {
   const cacheKey = params.toString();
   const xml  = await fetchArxiv(cacheKey);
   const feed = parseFeed(xml);
-  if (!feed.papers.length) throw new Error('No papers returned');
+  if (!feed.papers.length) return 0; // category may be empty or an alias — skip, don't error
   await sbWrite(cacheKey, feed);
   return feed.papers.length;
 }
@@ -308,8 +308,12 @@ async function main() {
     const tag = `[${String(i + 1).padStart(2)}/${SIDEBAR_CATEGORIES.length}] ${cat}`;
     try {
       const n = await warmCategory(cat);
-      console.log(`    ✓ ${tag}: ${n} papers`);
-      totalPapers += n;
+      if (n > 0) {
+        console.log(`    ✓ ${tag}: ${n} papers`);
+        totalPapers += n;
+      } else {
+        console.log(`    – ${tag}: 0 papers (empty or aliased category, skipped)`);
+      }
     } catch (err) {
       console.error(`    ✗ ${tag}: ${err.message}`);
       errors++;
